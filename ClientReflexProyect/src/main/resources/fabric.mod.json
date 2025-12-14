@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "clientreflex",
+  "version": "${version}",
+  "name": "ClientReflex",
+  "description": "Optimizes network performance by prioritizing critical packets, preventing disconnections, and providing advanced ping optimization features. Includes auto-reconnect, network HUD, entity prediction, and input smoothing.",
+  "authors": [
+    "zxNoragami"
+  ],
+  "contact": {
+    "sources": "https://github.com/zxNoragami/ClientReflex",
+    "issues": "https://github.com/zxNoragami/ClientReflex/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/clientreflex/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "main": [
+      "dev.zxnoragami.clientreflex.ClientReflexMod"
+    ],
+    "client": [
+      "dev.zxnoragami.clientreflex.ClientReflexClient"
+    ],
+    "modmenu": [
+      "dev.zxnoragami.clientreflex.ui.ModMenuIntegration"
+    ]
+  },
+  "mixins": [
+    "clientreflex.mixins.json"
+  ],
+  "accessWidener": "clientreflex.accesswidener",
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "fabric-api": "*",
+    "minecraft": "1.21.x",
+    "java": ">=21"
+  }
+}

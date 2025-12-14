@@ -1,0 +1,254 @@
+plugins {
+    id 'fabric-loom' version '1.9-SNAPSHOT'
+    id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+// Detectar modo de build (debug o release)
+// Se puede sobrescribir desde línea de comandos con: -Penv=release
+def buildEnv = project.hasProperty('env') ? project.property('env') : 
+               (project.hasProperty('smartping.env') ? project.property('smartping.env') : 'debug')
+def isRelease = buildEnv == 'release'
+
+repositories {
+    mavenCentral()
+    maven {
+        name = "Fabric"
+        url = "https://maven.fabricmc.net/"
+    }
+    maven {
+        name = "TerraformersMC"
+        url = "https://maven.terraformersmc.com/"
+    }
+    maven {
+        name = "Shedaniel"
+        url = "https://maven.shedaniel.me/"
+    }
+    maven {
+        name = "TerraformersMC"
+        url = "https://maven.terraformersmc.com/releases/"
+    }
+}
+
+loom {
+    // Access widener (vacío pero necesario para que Loom funcione correctamente)
+    accessWidenerPath = file("src/main/resources/clientreflex.accesswidener")
+    
+    // Forzar que remapJar incluya las clases
+    runConfigs.configureEach {
+        ideConfigGenerated = false
+    }
+    
+    // Configuración adicional para asegurar el remapeo
+    mixin {
+        defaultRefmapName = "ClientReflex-refmap.json"
+    }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    
+    // ModMenu - necesario para la integración de configuración
+    modImplementation "com.terraformersmc:modmenu:7.2.2"
+    
+    // Cloth Config para pantallas de configuración (versión para 1.21)
+    modApi("me.shedaniel.cloth:cloth-config-fabric:18.0.145") {
+        exclude(group: "net.fabricmc.fabric-api")
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "loader_version", project.loader_version
+    filteringCharset "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version,
+                "minecraft_version": project.minecraft_version,
+                "loader_version": project.loader_version
+    }
+}
+
+def targetJavaVersion = 21
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = targetJavaVersion
+    
+    // Configuraciones específicas según el modo de build
+    if (isRelease) {
+        // Release: optimizaciones agresivas, sin debug info
+        it.options.debug = false
+        it.options.incremental = true
+        it.options.compilerArgs.addAll([
+            '-Xlint:all',
+            '-Xlint:-processing',
+            '-Werror'
+        ])
+    } else {
+        // Debug: información de debug habilitada
+        it.options.debug = true
+        it.options.incremental = true
+        it.options.compilerArgs.addAll([
+            '-Xlint:all',
+            '-Xlint:-processing'
+        ])
+    }
+}
+
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    sourceCompatibility = javaVersion
+    targetCompatibility = javaVersion
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaToolchainSpec.languageVersion(javaVersion)
+    }
+    withSourcesJar()
+}
+
+// Configurar remapJar para asegurar que incluya las clases
+afterEvaluate {
+    remapJar {
+        // Asegurar que las clases estén incluidas desde el JAR dev
+        dependsOn jar
+        
+        doFirst {
+            // Verificar que el JAR dev existe y tiene clases
+            def devJar = jar.archiveFile.get().asFile
+            if (!devJar.exists()) {
+                throw new GradleException("JAR dev no encontrado: ${devJar.path}")
+            }
+            if (devJar.length() < 1000) {
+                throw new GradleException("JAR dev está vacío: ${devJar.path} (${devJar.length()} bytes)")
+            }
+            println "JAR dev existe: ${devJar.path} (${devJar.length() / 1024} KB)"
+        }
+    }
+    
+    // Verificación del JAR remapeado y copia del dev si está vacío
+    remapJar.doLast {
+        def remappedJar = remapJar.archiveFile.get().asFile
+        def devJar = jar.archiveFile.get().asFile
+        
+        if (remappedJar.exists()) {
+            if (remappedJar.length() > 1000) {
+                println "✓ JAR remapeado generado correctamente: ${remappedJar.length() / 1024} KB"
+            } else {
+                println "⚠ ADVERTENCIA: JAR remapeado está vacío (${remappedJar.length()} bytes)"
+                println "⚠ Copiando JAR dev como solución temporal..."
+                println "⚠ NOTA: El JAR dev usa nombres Yarn y puede no funcionar correctamente"
+                println "⚠ El JAR dev está en: ${devJar.path}"
+                
+                // Copiar el JAR dev como solución temporal
+                def tempRemapped = new File(remappedJar.parent, remappedJar.name.replace(".jar", "-dev-temp.jar"))
+                devJar.withInputStream { input ->
+                    tempRemapped.withOutputStream { output ->
+                        output << input
+                    }
+                }
+                println "⚠ JAR dev copiado a: ${tempRemapped.path}"
+            }
+        }
+    }
+}
+
+// Tarea personalizada para build de desarrollo
+task clientReflexDebug(dependsOn: [jar, remapJar]) {
+    group = 'build'
+    description = 'Crea un JAR de desarrollo para ClientReflex'
+    
+    doLast {
+        def devJar = jar.archiveFile.get().asFile
+        def remappedJar = remapJar.archiveFile.get().asFile
+        
+        // Verificar si el JAR remapeado tiene clases
+        def remappedHasClasses = false
+        if (remappedJar.exists() && remappedJar.length() > 1000) {
+            // Verificar rápidamente el tamaño - si es muy pequeño, no tiene clases
+            remappedHasClasses = remappedJar.length() > 10000
+        }
+        
+        if (!remappedHasClasses && devJar.exists()) {
+            println "⚠ ADVERTENCIA: El JAR remapeado está vacío. El JAR dev no se puede usar directamente en Minecraft."
+            println "⚠ Necesitas ejecutar 'remapJar' correctamente. Ejecuta: gradlew remapJar"
+            throw new GradleException("El JAR remapeado está vacío. Ejecuta 'gradlew remapJar' para generar el JAR correcto.")
+        }
+        
+        def finalJar = remapJar.archiveFile.get().asFile
+        println "========================================"
+        println "✓ Build de desarrollo completado"
+        println "  Modo: DEBUG"
+        println "  JAR: ${finalJar.path}"
+        println "  Tamaño: ${finalJar.length() / 1024} KB"
+        println "========================================"
+        println ""
+        println "El JAR está en: build/libs/"
+        println "Este es el JAR que debes usar en Minecraft"
+        println ""
+    }
+}
+
+// Tarea personalizada para build de release
+task clientReflexRelease(type: Copy, dependsOn: remapJar) {
+    group = 'build'
+    description = 'Crea un JAR de release optimizado para ClientReflex'
+    
+    onlyIf { isRelease }
+    
+    from(remapJar.archiveFile) {
+        rename { "${project.archives_base_name}-${project.version}-release.jar" }
+    }
+    
+    into file('build/releases')
+    
+    doFirst {
+        // Asegurar que el directorio existe
+        file('build/releases').mkdirs()
+        
+        println "========================================"
+        println "Construyendo release de ClientReflex"
+        println "  Versión: ${project.version}"
+        println "  Modo: RELEASE (optimizado)"
+        println "========================================"
+    }
+    
+    doLast {
+        def releaseJar = file("build/releases/${project.archives_base_name}-${project.version}-release.jar")
+        println "========================================"
+        println "✓ Build de release completado"
+        println "  JAR de producción: ${releaseJar.absolutePath}"
+        println "  Tamaño: ${releaseJar.length() / 1024} KB"
+        println "========================================"
+        println ""
+        println "Instalación:"
+        println "  Copia el JAR a: .minecraft/mods/"
+        println ""
+    }
+}
+
+// Asegurar que clientReflexRelease solo se ejecute en modo release
+clientReflexRelease.onlyIf { isRelease }
+
+// Tarea alias para build estándar que respeta el modo
+// Nota: No sobrescribimos la tarea build estándar de Gradle, solo añadimos nuestras tareas personalizadas
+// Para usar: gradlew clientReflexDebug o gradlew clientReflexRelease -Penv=release
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from(components.java)
+        }
+    }
+    repositories {
+    }
+}
+

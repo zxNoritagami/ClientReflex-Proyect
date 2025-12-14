@@ -1,0 +1,15 @@
+{
+  "key.clientreflex.togglehud": "Toggle Network HUD",
+  "category.clientreflex.general": "ClientReflex",
+  
+  "clientreflex.reconnect.now": "Retry now",
+  "clientreflex.autoreconnect.enabled": "Auto-reconnect: ON",
+  "clientreflex.autoreconnect.disabled": "Auto-reconnect: OFF",
+  
+  "clientreflex.command.reload.success": "Configuration reloaded successfully",
+  "clientreflex.command.timeout.set": "Read timeout set to %d seconds",
+  "clientreflex.command.info.timeout": "Read timeout: %d seconds",
+  "clientreflex.command.info.autoreconnect": "Auto-reconnect: %s",
+  "clientreflex.command.info.attempts": "Max attempts: %d"
+}
+
